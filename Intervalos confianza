@@ -1,0 +1,300 @@
+# MT1012 · Laboratorio de estimación. Única dependencia: shiny.
+library(shiny)
+
+ui <- fluidPage(
+  tags$head(tags$style(HTML("
+    body {background:#f3f6fa;color:#183047;font-size:16px;}
+    .container-fluid {max-width:1400px;}
+    .well {background:white;border:0;border-radius:12px;}
+    .tab-content {background:white;padding:20px;border-radius:0 0 12px 12px;}
+    h2,h3 {color:#124b66;} .btn-primary {background:#176a87;}
+    .nota {padding:14px;background:#eaf3f8;border-left:4px solid #176a87;margin:14px 0;}
+    .metricas {padding:14px;background:#edf5f2;border-radius:10px;margin:12px 0;}
+  "))),
+  titlePanel("MT1012 · Del muestreo al intervalo de confianza"),
+  p("Experimenta: fija una población, extrae muchas muestras y observa qué cambia."),
+  sidebarLayout(
+    sidebarPanel(width=3,
+      selectInput("pop", "Población y parámetro",
+        c("Normal · media"="normal", "Exponencial · media"="exp",
+          "Uniforme · media"="uniform", "Bernoulli · proporción"="bern")),
+      conditionalPanel("input.pop !== 'bern'",
+        numericInput("mu", "Media poblacional μ", 10, min=0.1, max=100, step=0.5)),
+      conditionalPanel("input.pop === 'normal'",
+        numericInput("sigma", "Desviación poblacional σ", 3, min=0.1, max=50, step=0.5)),
+      conditionalPanel("input.pop === 'bern'",
+        sliderInput("p", "Proporción poblacional p", 0.01, 0.99, 0.3, step=0.01)),
+      sliderInput("n", "Tamaño de cada muestra (n)", 2, 500, 30),
+      selectInput("B", "Número de muestras (B)", c(100,500,1000,5000), selected=1000),
+      numericInput("seed", "Semilla reproducible", 1012, min=1, max=2147483000, step=1),
+      actionButton("new", "Generar otra simulación", class="btn-primary"),
+      hr(),
+      sliderInput("level", "Nivel de confianza (%)", 80, 99, 95, step=1),
+      conditionalPanel("input.pop !== 'bern'",
+        selectInput("mean_method", "Intervalo para la media",
+          c("t de Student · σ desconocida"="t", "Normal · σ conocida"="z"))),
+      conditionalPanel("input.pop === 'bern'",
+        selectInput("prop_method", "Intervalo para la proporción",
+          c("Wilson"="wilson", "Wald · aproximación normal"="wald"))),
+      helpText("El nivel y el método recalculan los intervalos sobre las mismas muestras. Los parámetros, n y B generan nuevas muestras."),
+      downloadButton("csv", "Descargar resultados CSV")
+    ),
+    mainPanel(width=9,
+      uiOutput("context"),
+      tabsetPanel(
+        tabPanel("1 · Una muestra",
+          sliderInput("sample", "Inspeccionar muestra número", 1,1000,1,step=1,
+                      animate=animationOptions(interval=600,loop=FALSE)),
+          plotOutput("one",height="310px"),
+          uiOutput("one_text"),
+          div(class="nota", "Antes de mirar: ¿la estimación coincidirá exactamente con el parámetro? ¿Qué cambiaría con otra muestra?")),
+        tabPanel("2 · Distribución del estimador",
+          checkboxInput("theory", "Superponer referencia normal", TRUE),
+          plotOutput("sampling",height="350px"),
+          uiOutput("summary"),
+          div(class="nota", "Cada valor del histograma es una estimación obtenida de una muestra completa. No es una observación individual.")),
+        tabPanel("3 · Intervalos y cobertura",
+          sliderInput("shown", "Primeros intervalos que se muestran", 10,100,50,step=10),
+          plotOutput("intervals",height="500px"),
+          uiOutput("coverage"),
+          div(class="nota", strong("Interpretación frecuentista: "),
+            "el parámetro es fijo y los intervalos cambian de una muestra a otra. Un procedimiento con cobertura del 95 % contiene el parámetro en el 95 % de las repeticiones a largo plazo, bajo sus supuestos. Un intervalo ya calculado lo contiene o no lo contiene.")),
+        tabPanel("4 · Varianza",
+          h3("La varianza muestral estima la varianza poblacional"),
+          p("Se utilizan las mismas B muestras que en las pestañas anteriores. El selector de la primera pestaña determina la muestra destacada."),
+          withMathJax(HTML('<p>Estimador insesgado: \\(S^2 = \\frac{1}{n-1}\\sum_{i=1}^n (X_i-\\bar X)^2\\). El parámetro que estimamos es \\(\\sigma^2\\).</p>')),
+          uiOutput("variance_one"),
+          plotOutput("variance_sampling",height="350px"),
+          uiOutput("variance_summary"),
+          h3("Intervalos para la varianza poblacional"),
+          p("Se aplica el nivel de confianza del panel lateral. El gráfico usa el número de intervalos elegido en la pestaña 3."),
+          uiOutput("variance_assumptions"),
+          plotOutput("variance_intervals",height="450px"),
+          uiOutput("variance_coverage"),
+          withMathJax(HTML(paste0(
+            '<p>Con una población normal, \\(\\frac{(n-1)S^2}{\\sigma^2}\\sim\\chi^2_{n-1}\\). El intervalo exacto es:</p>',
+            '<p>\\[\\left[\\frac{(n-1)S^2}{\\chi^2_{n-1,1-\\alpha/2}},\\frac{(n-1)S^2}{\\chi^2_{n-1,\\alpha/2}}\\right].\\]</p>'))),
+          div(class="nota", "El intervalo estima σ², no S²: S² ya se conoce al observar la muestra. Los extremos suelen ser asimétricos respecto de S². El divisor n−1 hace que S² sea insesgado.")),
+        tabPanel("5 · Retos y fundamentos",
+          h3("Predice, simula y explica"),
+          tags$ol(
+            tags$li("Normal: compara n = 10, 40 y 160. Predice cómo cambia el error estándar y la anchura media de los intervalos."),
+            tags$li("Mantén las muestras y cambia la confianza del 90 % al 99 %. ¿Qué sucede con la anchura y la cobertura?"),
+            tags$li("Exponencial: compara n = 5 y n = 100. ¿Cuándo describe mejor la curva normal la distribución de las medias?"),
+            tags$li("Bernoulli: fija p = 0.05 y n = 10. Compara Wald y Wilson sobre las mismas muestras. Examina una muestra sin éxitos."),
+            tags$li("Aumenta B sin cambiar n. ¿Mejora la precisión de cada estimación o la precisión con que evaluamos el procedimiento?"),
+            tags$li("Varianza de una población normal: compara n = 5, 30 y 100. ¿Cómo cambia la asimetría de la distribución de S²? ¿Los intervalos son simétricos respecto de S²?")),
+          h3("Qué calcula la app"),
+          withMathJax(HTML(paste0(
+            '<p>Media: \\(\\bar X = n^{-1}\\sum_i X_i\\), con error estándar teórico \\(\\sigma/\\sqrt n\\).</p>',
+            '<p>IC con σ conocida: \\(\\bar X \\pm z_{1-\\alpha/2}\\sigma/\\sqrt n\\). ',
+            'IC con σ desconocida: \\(\\bar X \\pm t_{n-1,1-\\alpha/2}S/\\sqrt n\\).</p>',
+            '<p>Proporción: \\(\\hat p=X/n\\), con error estándar teórico \\(\\sqrt{p(1-p)/n}\\). ',
+            'Wald usa \\(\\hat p \\pm z_{1-\\alpha/2}\\sqrt{\\hat p(1-\\hat p)/n}\\).</p>'))),
+          p("Wilson se obtiene invirtiendo el contraste score binomial. Sus extremos permanecen en [0,1]. Wald puede salir de ese rango y colapsa si no hay éxitos o si todos lo son; la app conserva esos resultados para mostrar el problema."),
+          p("Los intervalos de la media son exactos para muestras normales independientes bajo los supuestos indicados. En poblaciones no normales son aproximados; con asimetría y n pequeño pueden tener mala cobertura. Wilson y Wald son aproximaciones para la proporción."),
+          p("La curva normal de referencia para las medias es exacta con población normal y aproximada en los otros casos. Para proporciones siempre es una aproximación continua a una distribución discreta."),
+          p("La cobertura observada fluctúa por azar. Su error Monte Carlo aproximado es √[c(1−c)/B], donde c es la cobertura observada. B controla esa fluctuación; n controla la precisión de cada estimación."),
+          p("Todas las muestras se generan con observaciones independientes. La población exponencial tiene media y desviación μ; la uniforme ocupa [0, 2μ] y tiene desviación μ/√3."),
+          p("Documentación: ", tags$a(href="https://shiny.posit.co/r/getstarted/shiny-basics/lesson1/", "Shiny para R", target="_blank"))
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  # Un estado por sesión; mismo diseño y semilla reproducen las mismas muestras.
+  samples <- reactive({
+    req(is.finite(input$mu), is.finite(input$sigma), is.finite(input$seed))
+    validate(need(input$mu>0 && input$mu<=100, "μ debe estar entre 0 y 100."),
+             need(input$sigma>0 && input$sigma<=50, "σ debe estar entre 0 y 50."),
+             need(input$seed>=1 && input$seed<=2147483000 && input$seed==floor(input$seed),
+                  "Introduce una semilla entera válida."))
+    B <- as.integer(input$B); n <- as.integer(input$n)
+    set.seed(as.integer((as.double(input$seed) + input$new) %% 2147483647))
+    x <- switch(input$pop,
+      normal=rnorm(n*B,input$mu,input$sigma), exp=rexp(n*B,rate=1/input$mu),
+      uniform=runif(n*B,0,2*input$mu), bern=rbinom(n*B,1,input$p))
+    x <- matrix(x,nrow=n,ncol=B)
+    theta <- if(input$pop=="bern") input$p else input$mu
+    sigma <- switch(input$pop,normal=input$sigma,exp=input$mu,
+                    uniform=input$mu/sqrt(3),bern=sqrt(input$p*(1-input$p)))
+    list(x=x, estimate=colMeans(x), s=apply(x,2,sd), theta=theta,
+         sigma=sigma, n=n, B=B, pop=input$pop,
+         seed=(as.double(input$seed)+input$new) %% 2147483647)
+  })
+  observeEvent(input$B, {
+    updateSliderInput(session,"sample",max=as.integer(input$B),value=1)
+  })
+  intervals <- reactive({
+    a <- samples(); est <- a$estimate
+    z <- qnorm(1-(1-input$level/100)/2)
+    if(a$pop=="bern") {
+      if(input$prop_method=="wilson") {
+        den <- 1+z^2/a$n
+        center <- (est+z^2/(2*a$n))/den
+        half <- z*sqrt(est*(1-est)/a$n+z^2/(4*a$n^2))/den
+      } else {
+        center <- est; half <- z*sqrt(est*(1-est)/a$n)
+      }
+    } else {
+      center <- est
+      half <- if(input$mean_method=="t") qt(1-(1-input$level/100)/2,a$n-1)*a$s/sqrt(a$n) else z*a$sigma/sqrt(a$n)
+    }
+    lo <- center-half; hi <- center+half
+    data.frame(muestra=seq_len(a$B),estimacion=est,inferior=lo,superior=hi,
+               contiene=(lo<=a$theta & hi>=a$theta))
+  })
+  index <- reactive(min(input$sample,samples()$B))
+  # La inferencia chi-cuadrado para σ² exige normalidad; S² se muestra para todas las poblaciones.
+  variance_results <- reactive({
+    a <- samples(); s2 <- a$s^2; alpha <- 1-input$level/100
+    lo <- hi <- rep(NA_real_,a$B)
+    if(a$pop=="normal") {
+      lo <- (a$n-1)*s2/qchisq(1-alpha/2,df=a$n-1)
+      hi <- (a$n-1)*s2/qchisq(alpha/2,df=a$n-1)
+    }
+    data.frame(muestra=seq_len(a$B),s2=s2,inferior=lo,superior=hi,
+               contiene=(lo<=a$sigma^2 & hi>=a$sigma^2))
+  })
+  output$variance_assumptions <- renderUI({
+    if(samples()$pop=="normal")
+      div(class="nota","Población normal: se muestran el intervalo exacto basado en chi-cuadrado y su cobertura.")
+    else div(class="nota","Para esta población se muestra S² y su distribución empírica. El intervalo chi-cuadrado no es válido en general fuera del modelo normal; selecciona Normal para explorar sus intervalos y cobertura.")
+  })
+  output$variance_one <- renderUI({
+    a <- samples(); d <- variance_results()[index(),]
+    div(class="metricas",
+      strong(sprintf("Muestra %d · S² = %.4f · σ² real = %.4f",index(),d$s2,a$sigma^2)),
+      p(sprintf("Error observado S² − σ² = %+.4f",d$s2-a$sigma^2)),
+      if(a$pop=="normal") p(sprintf("IC del %d %% para σ²: [%.4f, %.4f]. %s",input$level,d$inferior,d$superior,
+        if(d$contiene) "Contiene la varianza real." else "No contiene la varianza real.")))
+  })
+  output$variance_sampling <- renderPlot({
+    a <- samples(); d <- variance_results(); v <- a$sigma^2
+    par(mar=c(4,4,2,1))
+    h <- hist(d$s2,breaks=35,plot=FALSE)
+    # La densidad escalada puede ser infinita en cero con n=2: dibujar desde un valor positivo.
+    grid <- seq(max(.Machine$double.eps,v*1e-6),
+                max(c(d$s2,v))*1.05,length.out=800)
+    dens <- if(a$pop=="normal") dchisq((a$n-1)*grid/v,df=a$n-1)*(a$n-1)/v else NULL
+    plot(h,freq=FALSE,col="#a9c9d6",border="white",xlim=c(0,max(c(d$s2,v))*1.05),
+         ylim=c(0,max(h$density)*1.2),xlab="Varianza muestral S²",ylab="Densidad",
+         main=paste(a$B,"varianzas muestrales"))
+    if(a$pop=="normal") lines(grid,dens,col="#b65e18",lwd=2)
+    abline(v=v,col="#263238",lty=2,lwd=2)
+    abline(v=d$s2[index()],col="#176a87",lwd=2)
+    legend("topright",c("Varianza poblacional σ²","S² seleccionada",if(a$pop=="normal") "Densidad teórica exacta"),
+           col=c("#263238","#176a87",if(a$pop=="normal") "#b65e18"),
+           lty=c(2,1,if(a$pop=="normal") 1),bty="n",cex=.85)
+  })
+  output$variance_summary <- renderUI({
+    a <- samples(); s2 <- variance_results()$s2
+    div(class="metricas",
+      sprintf("Media de S²: %.4f · sesgo empírico: %+.4f · desviación empírica de S²: %.4f",mean(s2),mean(s2)-a$sigma^2,sd(s2)),
+      if(a$pop=="normal") p(sprintf("Error estándar teórico de S²: σ² √[2/(n−1)] = %.4f",a$sigma^2*sqrt(2/(a$n-1)))),
+      p("S² es insesgado para las cuatro poblaciones incluidas. La referencia chi-cuadrado y la fórmula del error estándar anterior se aplican a la población normal."))
+  })
+  output$variance_intervals <- renderPlot({
+    a <- samples()
+    validate(need(a$pop=="normal","Selecciona una población normal para ver los intervalos chi-cuadrado."))
+    d <- head(variance_results(),input$shown)
+    co <- ifelse(d$contiene,"#176a87","#c34825")
+    par(mar=c(4,4,2,1))
+    plot(d$s2,d$muestra,type="n",xlim=range(c(d$inferior,d$superior,a$sigma^2)),
+         ylim=rev(range(d$muestra)),xlab="S² e intervalo de confianza para σ²",
+         ylab="Número de muestra",main=paste("Primeros",nrow(d),"intervalos para la varianza"))
+    abline(v=a$sigma^2,col="#263238",lty=2,lwd=2)
+    segments(d$inferior,d$muestra,d$superior,d$muestra,col=co,lwd=2)
+    points(d$s2,d$muestra,col=co,pch=16,cex=.65)
+    legend("topright",c("Contiene σ²","No contiene σ²"),col=c("#176a87","#c34825"),lty=1,bty="n",cex=.8)
+  })
+  output$variance_coverage <- renderUI({
+    a <- samples()
+    if(a$pop!="normal") return(NULL)
+    d <- variance_results(); cov <- mean(d$contiene)
+    div(class="metricas",
+      strong(sprintf("Cobertura de σ²: %.2f %% (%d de %d).",100*cov,sum(d$contiene),a$B)),
+      p(sprintf("Nivel nominal: %d %% · anchura media: %.4f · error Monte Carlo aproximado: %.2f puntos porcentuales.",input$level,mean(d$superior-d$inferior),100*sqrt(cov*(1-cov)/a$B))),
+      p("El cálculo usa las B muestras. Se aplica la interpretación frecuentista y la cautela sobre el error Monte Carlo explicadas en la pestaña 3."))
+  })
+  method_name <- reactive(if(samples()$pop=="bern") input$prop_method else input$mean_method)
+  output$context <- renderUI({
+    a <- samples()
+    div(class="nota", strong(sprintf("Parámetro real = %.3f",a$theta)),
+        sprintf(" · n = %d · B = %d · confianza = %d %% · método: %s",a$n,a$B,input$level,method_name()))
+  })
+  output$one <- renderPlot({
+    a <- samples(); i <- index(); x <- a$x[,i]
+    par(mar=c(4,4,2,1))
+    if(a$pop=="bern") {
+      barplot(c(sum(x==0),sum(x==1)),names.arg=c("0 · fracaso","1 · éxito"),
+              col=c("#a9c9d6","#176a87"),ylab="Frecuencia",main=paste("Muestra",i))
+    } else {
+      hist(x,breaks="FD",col="#a9c9d6",border="white",xlab="Observaciones individuales",
+           main=paste("Muestra",i),xlim=range(c(x,a$theta,a$estimate[i])))
+      abline(v=a$theta,col="#263238",lty=2,lwd=2)
+      abline(v=a$estimate[i],col="#176a87",lwd=2)
+      legend("topright",c("Parámetro real","Estimación"),col=c("#263238","#176a87"),lty=c(2,1),bty="n")
+    }
+  })
+  output$one_text <- renderUI({
+    a <- samples(); d <- intervals()[index(),]
+    div(class="metricas",
+      sprintf("Estimación: %.4f · error observado: %+.4f · IC: [%.4f, %.4f]. ",d$estimacion,d$estimacion-a$theta,d$inferior,d$superior),
+      strong(if(d$contiene) "Contiene el parámetro." else "No contiene el parámetro."))
+  })
+  output$sampling <- renderPlot({
+    a <- samples(); se <- a$sigma/sqrt(a$n)
+    par(mar=c(4,4,2,1))
+    lim <- range(c(a$estimate,a$theta+c(-4,4)*se))
+    h <- hist(a$estimate,breaks=35,plot=FALSE)
+    ymax <- max(h$density,if(input$theory) dnorm(a$theta,a$theta,se) else 0)*1.12
+    plot(h,freq=FALSE,col="#a9c9d6",border="white",xlim=lim,ylim=c(0,ymax),
+         main=paste(a$B,"estimaciones de muestras distintas"),xlab="Estimación",ylab="Densidad")
+    abline(v=a$theta,col="#263238",lty=2,lwd=2)
+    if(input$theory) curve(dnorm(x,a$theta,se),from=lim[1],to=lim[2],add=TRUE,col="#b65e18",lwd=2)
+    abline(v=a$estimate[index()],col="#176a87",lwd=2)
+    legend("topright",c("Parámetro real","Estimación seleccionada",if(input$theory) "Referencia normal"),
+           col=c("#263238","#176a87",if(input$theory) "#b65e18"),lty=c(2,1,if(input$theory) 1),bty="n",cex=.85)
+  })
+  output$summary <- renderUI({
+    a <- samples()
+    div(class="metricas",sprintf("Media de estimaciones: %.4f · sesgo empírico: %+.4f · desviación empírica: %.4f · error estándar teórico: %.4f",mean(a$estimate),mean(a$estimate)-a$theta,sd(a$estimate),a$sigma/sqrt(a$n)),
+        p("La desviación de las estimaciones describe la variabilidad entre muestras. Los estimadores incluidos son insesgados; el sesgo empírico puede ser distinto de cero por la simulación finita."))
+  })
+  output$intervals <- renderPlot({
+    a <- samples(); d <- head(intervals(),input$shown)
+    co <- ifelse(d$contiene,"#176a87","#c34825")
+    par(mar=c(4,4,2,1))
+    plot(d$estimacion,d$muestra,type="n",xlim=range(c(d$inferior,d$superior,a$theta)),
+         ylim=rev(range(d$muestra)),xlab="Estimación e intervalo de confianza",
+         ylab="Número de muestra",main=paste("Primeros",nrow(d),"intervalos"))
+    abline(v=a$theta,col="#263238",lty=2,lwd=2)
+    segments(d$inferior,d$muestra,d$superior,d$muestra,col=co,lwd=2)
+    points(d$estimacion,d$muestra,col=co,pch=16,cex=.65)
+    legend("topright",c("Contiene","No contiene"),col=c("#176a87","#c34825"),lty=1,bty="n",bg="white",cex=.8)
+  })
+  output$coverage <- renderUI({
+    a <- samples(); d <- intervals(); cov <- mean(d$contiene)
+    div(class="metricas",strong(sprintf("Cobertura observada: %.2f %% (%d de %d).",100*cov,sum(d$contiene),a$B)),
+        p(sprintf("Nivel nominal: %d %% · anchura media: %.4f · error Monte Carlo aproximado: %.2f puntos porcentuales.",input$level,mean(d$superior-d$inferior),100*sqrt(cov*(1-cov)/a$B))),
+        p("La cobertura usa las B muestras, aunque el gráfico solo muestre las primeras. No tiene por qué coincidir exactamente con el nivel nominal. El error Monte Carlo estimado puede ser cero si todos los resultados coinciden; esto no demuestra ausencia de incertidumbre."))
+  })
+  output$csv <- downloadHandler(
+    filename=function() paste0("MT1012_",samples()$pop,"_simulacion.csv"),
+    content=function(file) {
+      a <- samples(); d <- intervals()
+      d$parametro <- a$theta; d$n <- a$n; d$B <- a$B; d$poblacion <- a$pop
+      d$semilla_efectiva <- a$seed; d$confianza <- input$level/100; d$metodo <- method_name()
+      vd <- variance_results()
+      d$varianza_muestral <- vd$s2; d$varianza_poblacional <- a$sigma^2
+      d$varianza_ic_inferior <- vd$inferior; d$varianza_ic_superior <- vd$superior
+      d$varianza_ic_contiene <- vd$contiene
+      d$varianza_ic_metodo <- if(a$pop=="normal") "chi-cuadrado" else NA_character_
+      write.csv(d,file,row.names=FALSE,fileEncoding="UTF-8")
+    }
+  )
+}
+shinyApp(ui,server)
